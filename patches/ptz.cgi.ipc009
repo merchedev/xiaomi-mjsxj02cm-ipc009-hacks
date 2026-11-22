@@ -1,0 +1,78 @@
+#!/bin/sh
+# PTZ control CGI for the optional webctl page.
+#
+# This is the SD-card replacement for
+# /mnt/sdcard/hacks/webctl/www/cgi-bin/ptz.cgi.
+#
+# It reads /mnt/sdcard/hacks/ptz.conf:
+#   INVERT_PAN=1  -> swap left/right
+#   INVERT_TILT=1 -> swap up/down
+#
+# For a ceiling-mounted camera with the image flip enabled, set both to 1.
+# The web page reads this file on every request; no restart is needed.
+
+EVENT_FILE="/mnt/sdcard/hacks/motor_control/event"
+PTZ_CONF="/mnt/sdcard/hacks/ptz.conf"
+DEFAULT_STEPS=5
+
+INVERT_PAN=0
+INVERT_TILT=0
+[ -f "$PTZ_CONF" ] && . "$PTZ_CONF"
+INVERT_PAN=${INVERT_PAN:-0}
+INVERT_TILT=${INVERT_TILT:-0}
+
+DIR=""
+STEPS="$DEFAULT_STEPS"
+OLD_IFS="$IFS"
+IFS='&'
+for kv in $QUERY_STRING; do
+    key=${kv%%=*}
+    val=${kv#*=}
+    case "$key" in
+        dir) DIR="$val" ;;
+        steps)
+            case "$val" in
+                ''|*[!0-9]*) ;;
+                *) STEPS="$val" ;;
+            esac
+            ;;
+    esac
+done
+IFS="$OLD_IFS"
+
+case "$DIR" in
+    left)
+        if [ "$INVERT_PAN" = "1" ]; then CMD="pan reverse $STEPS"; else CMD="pan forward $STEPS"; fi
+        ;;
+    right)
+        if [ "$INVERT_PAN" = "1" ]; then CMD="pan forward $STEPS"; else CMD="pan reverse $STEPS"; fi
+        ;;
+    up)
+        if [ "$INVERT_TILT" = "1" ]; then CMD="tilt reverse $STEPS"; else CMD="tilt forward $STEPS"; fi
+        ;;
+    down)
+        if [ "$INVERT_TILT" = "1" ]; then CMD="tilt forward $STEPS"; else CMD="tilt reverse $STEPS"; fi
+        ;;
+    *) CMD="" ;;
+esac
+
+echo "Content-Type: application/json"
+echo ""
+
+if [ -z "$CMD" ]; then
+    echo '{"ok":false,"error":"unknown or missing dir (use left|right|up|down)"}'
+    exit 0
+fi
+
+if [ ! -e "$EVENT_FILE" ]; then
+    printf '{"ok":false,"error":"event file not found: %s"}\n' "$EVENT_FILE"
+    exit 0
+fi
+
+echo "$CMD" > "$EVENT_FILE" 2>/tmp/webctl_ptz_err
+if [ $? -eq 0 ]; then
+    echo "{\"ok\":true,\"cmd\":\"$CMD\"}"
+else
+    ERR=$(cat /tmp/webctl_ptz_err 2>/dev/null)
+    echo "{\"ok\":false,\"error\":\"write failed: $ERR\"}"
+fi

@@ -81,6 +81,26 @@ do_start() {
 }
 ```
 
+## PTZ services at boot
+
+The autostart patch calls `configure_services.sh` after mounting the SD card.
+That script installs every service directory under `hacks/*/meta/service` that
+contains a `.enable` file.
+
+The optional PTZ add-on provides:
+
+| Service directory | What it starts |
+|-------------------|----------------|
+| `onvif_srvd/meta/service` | `start_onvif.sh`, which starts `motord` and the ONVIF server on port 5000 |
+| `webctl/meta/service` | `busybox httpd` for the web PTZ page on port 8081 |
+
+The `start_onvif.sh` supervisor keeps the daemonized ONVIF server alive and
+reads `/mnt/sdcard/hacks/ptz.conf` for the PTZ directions. The web PTZ CGI
+reads the same file.
+
+No rootfs change is needed for the PTZ services. They are installed from the
+SD card on every boot. See [`09-onvif-ptz.md`](09-onvif-ptz.md).
+
 ## Rebuild the rootfs
 
 ```bash
@@ -105,15 +125,17 @@ netstat -tln
 Expected:
 
 ```text
-0.0.0.0:80
-0.0.0.0:4558
-0.0.0.0:8554
+0.0.0.0:80      web config (optional; may be disabled for RAM)
+0.0.0.0:4558    WebSocket (optional; may be disabled for RAM)
+0.0.0.0:5000    ONVIF PTZ (only if the PTZ add-on is installed)
+0.0.0.0:8081    web PTZ (only if the PTZ add-on is installed)
+0.0.0.0:8554    RTSP
 ```
 
 5. Check the processes:
 
 ```sh
-ps | grep -E "rtsp|web-config|websocket|framegrabber"
+ps | grep -E "rtsp|web-config|websocket|framegrabber|motord|onvif_srvd|httpd"
 ```
 
 If they are running without manual intervention, autostart works.

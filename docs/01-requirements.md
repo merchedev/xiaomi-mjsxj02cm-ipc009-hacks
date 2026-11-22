@@ -51,6 +51,18 @@ sudo apt install squashfs-tools
 brew install squashfs
 ```
 
+## Optional software for PTZ and ONVIF
+
+Only needed if you install the optional `ipc009_ptz_hack.zip`:
+
+- `ffprobe` (part of FFmpeg) to verify the RTSP stream.
+- Python 3 and `onvif-zeep` to test the ONVIF PTZ server from a computer.
+- A Frigate or Home Assistant host that can reach the camera at RTSP port
+  8554 and ONVIF port 5000.
+
+The PTZ add-on itself runs on the camera and does not need extra software on
+the camera.
+
 ## Voltage warning
 
 The camera UART is **3.3 V**. A 5 V signal on TX can damage the camera.

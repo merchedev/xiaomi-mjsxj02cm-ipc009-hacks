@@ -37,7 +37,8 @@ account, no mobile app after the initial setup.
 10. [Step 7 — Use it with Frigate or go2rtc](#step-7--use-it-with-frigate-or-go2rtc)
 11. [Troubleshooting](#troubleshooting)
 12. [Restore the original firmware](#restore-the-original-firmware)
-13. [Credits and license](#credits-and-license)
+13. [Optional add-ons](#optional-add-ons)
+14. [Credits and license](#credits-and-license)
 
 ---
 
@@ -48,9 +49,17 @@ After the hack, the camera exposes:
 | Service | Port | Purpose |
 |---------|------|---------|
 | Telnet | 23 | Root shell (no password by default) |
-| Web config | 80 | Browser UI to configure the hack |
-| WebSocket | 4558 | Auxiliary stream |
+| Web config | 80 | Optional browser UI to configure the hack; may be disabled for RAM |
+| WebSocket | 4558 | Optional auxiliary stream; may be disabled for RAM |
+| ONVIF PTZ | 5000 | Optional; PTZ control for Frigate, Home Assistant and ONVIF clients |
+| Web PTZ | 8081 | Optional; small browser page to move the camera |
 | RTSP | 8554 | Main video stream |
+
+> The base `ipc009_hack.zip` provides the web config and WebSocket services.
+> The optional `ipc009_ptz_hack.zip` adds ONVIF and the web PTZ page. On 64 MB
+> cameras you may need to disable the web config and WebSocket services to
+> keep ONVIF stable; see
+> [`docs/11-ram-optimization.md`](docs/11-ram-optimization.md).
 
 RTSP URLs:
 
@@ -70,6 +79,10 @@ Replace `<CAMERA_IP>` with the IP address your router gives to the camera.
   adapter. See the next section.
 - A **microSD card** (8 GB or more is fine) formatted as **FAT32** with a
   single partition.
+- Optional: the `ipc009_ptz_hack.zip` add-on for pan/tilt control from
+  Frigate, Home Assistant or an ONVIF client.
+- Optional: a Frigate or Home Assistant host on a network that can reach the
+  camera at RTSP port 8554 and ONVIF port 5000.
 - A computer with:
   - `git`
   - Python 3
@@ -425,8 +438,8 @@ The important file is:
 /mnt/sdcard/manu_test/configure_services.sh
 ```
 
-This is the script that starts the RTSP server, the web server and the
-WebSocket server.
+This is the script that starts the RTSP server, the web server, the
+WebSocket server and any optional PTZ services.
 
 > **Note:** if you use the original rootfs without the autostart patch,
 > you will need to run this script manually after every boot:
@@ -434,6 +447,27 @@ WebSocket server.
 > ```sh
 > /mnt/sdcard/manu_test/configure_services.sh &
 > ```
+
+### Optional: PTZ and ONVIF
+
+If you want pan/tilt control from Frigate, Home Assistant or an ONVIF client,
+unzip `mjsxj02cm/ipc009_ptz_hack.zip` to the **root** of the same SD card as
+well. Merge the folders; do not replace the base hack.
+
+It adds:
+
+```text
+hacks/motor_control/
+hacks/onvif_srvd/
+hacks/webctl/
+hacks/ptz.conf
+scripts/install_ptz_services.sh
+scripts/optimize_ram.sh
+```
+
+The PTZ add-on is optional and does not modify the rootfs. It can be removed
+later. See [`docs/09-onvif-ptz.md`](docs/09-onvif-ptz.md) for the complete
+installation and Frigate/Home Assistant configuration.
 
 ---
 
@@ -456,6 +490,11 @@ The patch in `patches/S60service.ipc009-4.3.7` fixes all three:
 - Mounts `/mnt/sdcard` again.
 - Creates the `libshbf`/`libshbfev` symlinks that `framegrabber` needs.
 - Starts `configure_services.sh` directly.
+
+> If you installed the PTZ add-on, `configure_services.sh` also installs the
+> `onvif_srvd` and `webctl` services from the SD card on every boot. The
+> `start_onvif.sh` supervisor starts `motord` and the ONVIF server. See
+> [`docs/09-onvif-ptz.md`](docs/09-onvif-ptz.md).
 
 ### 5.1 Rebuild the rootfs with the patch
 
@@ -516,7 +555,8 @@ Media -> Open Network Stream -> rtsp://<CAMERA_IP>:8554/mainstream
 
 If the stream opens, the hack is working.
 
-You can also check the web config UI:
+If the web config service is enabled (port 80; it may be disabled for RAM),
+open:
 
 ```text
 http://<CAMERA_IP>/
@@ -532,6 +572,22 @@ Login as `root`. The default root password is empty on this hack.
 
 > **Security note:** telnet with no password is convenient during setup but
 > dangerous on a shared network. See the security section below.
+
+If you installed the PTZ add-on, also check:
+
+```sh
+netstat -tln | grep -E ':(5000|8081) '
+```
+
+Expected:
+
+```text
+0.0.0.0:5000    ONVIF PTZ
+0.0.0.0:8081    web PTZ
+```
+
+Open `http://<CAMERA_IP>:8081/` for the optional web PTZ page. If port 5000
+is not listening, see [`docs/09-onvif-ptz.md`](docs/09-onvif-ptz.md).
 
 ---
 
@@ -550,9 +606,22 @@ cameras:
           roles:
             - detect
             - record
+
+    onvif:
+      host: <CAMERA_IP>
+      port: 5000
+      user: admin
+      password: admin
 ```
 
-Restart Frigate and check the logs.
+Restart Frigate and check the logs. The `onvif` block is optional; it adds
+the PTZ controls. The video stream still comes from the `rtsp://` input. See
+[`docs/09-onvif-ptz.md`](docs/09-onvif-ptz.md) for the full PTZ setup and
+troubleshooting.
+
+> If the camera is mounted upside down, also read
+> [`docs/10-flip.md`](docs/10-flip.md). The image flip and the PTZ direction
+> are configured on the camera, not in Frigate.
 
 ### go2rtc
 
@@ -577,14 +646,28 @@ Then open the go2rtc web UI and test the stream.
 The hack services have **no authentication by default**. If your network is
 not fully trusted, at minimum:
 
-- Do not expose ports 23, 80, 4558 or 8554 to the internet.
+- Do not expose ports 23, 80, 4558, 5000, 8081 or 8554 to the internet.
 - Keep the camera on a separate VLAN or guest network if possible.
 - Change the telnet root password if your build supports it.
-- Use firewall rules so only your NVR can reach port 8554.
+- The ONVIF server defaults to `admin` / `admin`. Change it if your build
+  supports `--user` / `--password` in `start_onvif.sh`, then update Frigate
+  and Home Assistant.
+- The web PTZ page on 8081 and the RTSP stream on 8554 have no
+  authentication. Restrict them to the NVR/Frigate host with firewall rules.
+- Do not expose the optional `web-config` page on 80 or the WebSocket server
+  on 4558 unless you need them. On 64 MB cameras they should be disabled for
+  RAM; see [`docs/11-ram-optimization.md`](docs/11-ram-optimization.md).
 
 ---
 
 ## Troubleshooting
+
+For PTZ, image flip, RAM and Wi-Fi problems, see the dedicated guides:
+
+- [`docs/09-onvif-ptz.md`](docs/09-onvif-ptz.md)
+- [`docs/10-flip.md`](docs/10-flip.md)
+- [`docs/11-ram-optimization.md`](docs/11-ram-optimization.md)
+- [`docs/12-wifi.md`](docs/12-wifi.md)
 
 ### The camera does not send anything on UART
 
@@ -691,11 +774,70 @@ The camera returns to the exact state of the backup.
 
 ---
 
+## Optional add-ons
+
+These add-ons are separate from the base RTSP/telnet hack. They do not modify
+the rootfs and can be removed later.
+
+### PTZ and ONVIF
+
+Use `mjsxj02cm/ipc009_ptz_hack.zip` to add:
+
+- ONVIF PTZ on port 5000 for Frigate and Home Assistant.
+- A small web PTZ page on port 8081.
+- The `motord` motor daemon.
+
+Full guide: [`docs/09-onvif-ptz.md`](docs/09-onvif-ptz.md).
+
+### Flip the image for a ceiling mount
+
+If the camera is mounted upside down:
+
+```sh
+mortoxc set nvram default flip on
+```
+
+Then set the PTZ direction in `/mnt/sdcard/hacks/ptz.conf`:
+
+```sh
+INVERT_PAN=1
+INVERT_TILT=1
+```
+
+The image flip is local; it does not use the Xiaomi cloud and does not
+transcode in Frigate.
+
+Full guide: [`docs/10-flip.md`](docs/10-flip.md).
+
+### RAM optimization for 64 MB cameras
+
+The stock cloud stack plus the web configuration server can trigger the Linux
+OOM killer and make ONVIF unstable. The optimization disables services that
+are not needed for local RTSP/ONVIF/PTZ.
+
+Full guide: [`docs/11-ram-optimization.md`](docs/11-ram-optimization.md).
+
+### Change Wi-Fi without opening the camera
+
+The camera can be moved to another 2.4 GHz/WPA2 network over telnet or UART.
+The guide covers the custom `/mnt/data/wpa.conf` method, the stock NVRAM
+method, DHCP reservations and rollback.
+
+Full guide: [`docs/12-wifi.md`](docs/12-wifi.md).
+
+---
+
 ## Credits and license
 
 - Original project: [`tsunglung/xiaomi-360-hacks`](https://github.com/tsunglung/xiaomi-360-hacks)
+- Optional PTZ package: community `install.zip` from the
+  [it-board.ru MJSXJ02CM guide](https://it-board.ru/raznoe/361-vosstanovlenie-i-pereproshivka-xiaomi-mi-home-security-camera-360-1080p-mjsxj02cm-na-onvif-rtsp.html)
+- ONVIF server: [`onvif_srvd`](https://github.com/KoenVanDuffel/onvif_srvd)
+- Local miIO/PTZ context and `flip` prior art:
+  [`666dsa666/mjsxj02cm-hacks`](https://github.com/666dsa666/mjsxj02cm-hacks)
 - This fork: focused on MJSXJ02CM / IPC009 firmware 4.3.7_0417.
 - License: **GNU General Public License v3.0** (see `LICENSE`).
+- Third-party notices: [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 The original project and this fork are provided as-is, with no warranty.
 You are responsible for your own hardware.

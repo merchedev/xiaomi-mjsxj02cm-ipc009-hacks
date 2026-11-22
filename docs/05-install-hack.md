@@ -28,11 +28,35 @@ The exact folder names matter. The autostart patch expects:
 /mnt/sdcard/manu_test/configure_services.sh
 ```
 
+## Optional PTZ and ONVIF add-on
+
+If you want pan/tilt control from Frigate, Home Assistant or an ONVIF client,
+unzip `ipc009_ptz_hack.zip` to the **root** of the same SD card as well. Merge
+the folders; do not replace the base hack.
+
+It adds:
+
+```text
+hacks/motor_control/
+hacks/onvif_srvd/
+hacks/webctl/
+hacks/ptz.conf
+scripts/install_ptz_services.sh
+scripts/optimize_ram.sh
+```
+
+The PTZ add-on does not modify the rootfs. It is optional and can be removed
+later. See [`09-onvif-ptz.md`](09-onvif-ptz.md) for the full installation,
+Frigate/Home Assistant configuration and troubleshooting.
+
+On a 64 MB camera, read [`11-ram-optimization.md`](11-ram-optimization.md)
+before enabling ONVIF together with the stock cloud services.
+
 ## What the files do
 
 | Path | Purpose |
 |------|---------|
-| `manu_test/configure_services.sh` | Starts RTSP, web and WebSocket services |
+| `manu_test/configure_services.sh` | Starts RTSP, web, WebSocket and any optional PTZ services |
 | `hacks/` | Supporting binaries and configs |
 | `scripts/` | Helper scripts from the original hack |
 
@@ -58,15 +82,17 @@ netstat -tln
 Expected:
 
 ```text
-0.0.0.0:80      web config
-0.0.0.0:4558    WebSocket
+0.0.0.0:80      web config (optional; may be disabled for RAM)
+0.0.0.0:4558    WebSocket (optional; may be disabled for RAM)
+0.0.0.0:5000    ONVIF PTZ (only if the PTZ add-on is installed)
+0.0.0.0:8081    web PTZ (only if the PTZ add-on is installed)
 0.0.0.0:8554    RTSP
 ```
 
 6. Check the processes:
 
 ```sh
-ps | grep -E "rtsp|web-config|websocket|framegrabber"
+ps | grep -E "rtsp|web-config|websocket|framegrabber|motord|onvif_srvd|httpd"
 ```
 
 If the services are running, continue with `06-autostart.md`.

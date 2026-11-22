@@ -157,6 +157,83 @@ network and a newer one), the camera may connect to the wrong one.
   0   <SSID>   any   [CURRENT]
   ```
 
+See [`12-wifi.md`](12-wifi.md) for the full Wi-Fi change procedure, DHCP
+reservations and rollback.
+
+## PTZ and ONVIF
+
+### Port 5000 is not listening
+
+```sh
+/mnt/sdcard/hacks/runit/bin/sv status /mnt/data/etc/runit/onvif_srvd-run
+ps | grep -E 'motord|onvif_srvd' | grep -v grep
+netstat -tln | grep 5000
+```
+
+- `motord` and `onvif_srvd` must be running.
+- `start_onvif.sh` must be the supervisor from `patches/start_onvif.sh.ipc009`
+  or from `ipc009_ptz_hack.zip`, not the original community script.
+- Check for an OOM kill:
+
+  ```sh
+  dmesg | grep -i -E 'oom|killed process'
+  ```
+
+  On 64 MB cameras, see [`11-ram-optimization.md`](11-ram-optimization.md).
+
+### `sv status` says `down: ... normally up, want up`
+
+`onvif_srvd` daemonizes. A plain runit service would exit and restart in a
+loop. Use the provided `start_onvif.sh` supervisor. Restart the service:
+
+```sh
+/mnt/sdcard/hacks/runit/bin/sv down /mnt/data/etc/runit/onvif_srvd-run
+sleep 2
+killall onvif_srvd
+/mnt/sdcard/hacks/runit/bin/sv up /mnt/data/etc/runit/onvif_srvd-run
+```
+
+### Frigate does not show PTZ controls
+
+- Confirm the `onvif` block is inside the correct camera.
+- Confirm the Frigate host can reach `<CAMERA_IP>:5000`.
+- The small ONVIF server may return an empty list for `GetConfigurations`.
+  `ContinuousMove` still works. If Frigate does not show the controls, use
+  the web PTZ page on 8081 or the Home Assistant REST fallback in
+  [`09-onvif-ptz.md`](09-onvif-ptz.md).
+
+### The `motord` status file contains `0`
+
+The `status` file is not reliable on this firmware. Use the camera movement,
+the web page or the ONVIF client to verify. The `motord` debug log shows the
+real commands.
+
+### The image is upside down
+
+```sh
+mortoxc set nvram default flip on
+mortoxc get nvram default flip
+```
+
+See [`10-flip.md`](10-flip.md).
+
+### PTZ arrows move in the wrong direction
+
+Set `INVERT_PAN` and `INVERT_TILT` in `/mnt/sdcard/hacks/ptz.conf`, then
+restart the ONVIF service. The web page reads the file without a restart.
+See [`10-flip.md`](10-flip.md).
+
+## RAM and OOM
+
+If `dmesg` shows `oom-killer` / `Killed process`, or ONVIF disappears after a
+few seconds, disable the optional web configuration and cloud services:
+
+- `web-config` (port 80)
+- `websocket-stream-server` (port 4558)
+- the stock `miio_*` cloud services
+
+See [`11-ram-optimization.md`](11-ram-optimization.md).
+
 ## Recovery
 
 ### The camera does not boot at all

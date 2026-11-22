@@ -1,5 +1,64 @@
 # Patches
 
+This directory contains both rootfs patches and SD-card script replacements.
+Read the installation notes in the linked document before applying one.
+
+## `start_onvif.sh.ipc009`
+
+Replacement for `/mnt/sdcard/hacks/onvif_srvd/start_onvif.sh` (SD card, not
+rootfs). It is the supervisor used by the optional ONVIF/PTZ add-on.
+
+It fixes three practical problems:
+
+1. `onvif_srvd` daemonizes. A normal runit service would see the parent exit
+   and restart it in a loop. The supervisor keeps a wrapper loop alive.
+2. The original community script does `killall -9 motord` on every start. If
+   `motord` is blocked in the motor driver, the kill can hang and ONVIF never
+   starts. The supervisor keeps `motord` independent and starts it only when
+   it is missing.
+3. `motord` needs `LD_LIBRARY_PATH=/mnt/data/lib` to find
+   `libdevice_kit.so`.
+
+It also reads `/mnt/sdcard/hacks/ptz.conf`:
+
+```sh
+INVERT_PAN=0
+INVERT_TILT=0
+```
+
+Set both to `1` for a ceiling-mounted camera with the image flipped.
+
+### How to apply
+
+```sh
+cp patches/start_onvif.sh.ipc009 \
+   /Volumes/SDCARD/hacks/onvif_srvd/start_onvif.sh
+chmod +x /Volumes/SDCARD/hacks/onvif_srvd/start_onvif.sh
+```
+
+Then restart the ONVIF service. See `docs/09-onvif-ptz.md` and
+`docs/10-flip.md`.
+
+## `ptz.cgi.ipc009`
+
+Replacement for `/mnt/sdcard/hacks/webctl/www/cgi-bin/ptz.cgi` (SD card, not
+rootfs).
+
+It reads the same `/mnt/sdcard/hacks/ptz.conf` and swaps the left/right and
+up/down commands when `INVERT_PAN` or `INVERT_TILT` is `1`. The web page reads
+the file on every request, so no service restart is needed after changing the
+directions.
+
+### How to apply
+
+```sh
+cp patches/ptz.cgi.ipc009 \
+   /Volumes/SDCARD/hacks/webctl/www/cgi-bin/ptz.cgi
+chmod +x /Volumes/SDCARD/hacks/webctl/www/cgi-bin/ptz.cgi
+```
+
+See `docs/09-onvif-ptz.md` and `docs/10-flip.md`.
+
 ## `S60service.ipc009-4.3.7`
 
 Replacement for `/etc/init.d/S60service` on the Xiaomi MJSXJ02CM / IPC009

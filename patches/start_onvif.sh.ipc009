@@ -1,0 +1,85 @@
+#!/bin/sh
+# ONVIF PTZ supervisor for Xiaomi MJSXJ02CM / IPC009.
+#
+# This is the SD-card replacement for /mnt/sdcard/hacks/onvif_srvd/start_onvif.sh.
+# It is not a rootfs patch.
+#
+# Why this wrapper is needed:
+#   - onvif_srvd daemonizes. A plain runit "run" script would exit as soon as
+#     the daemon is forked, and runit would restart it in a loop.
+#   - The original community script does "killall -9 motord" on every start.
+#     If motord is blocked in the motor driver, killall can hang and the
+#     service never starts. motord is kept independent here.
+#   - motord needs libdevice_kit.so from /mnt/data/lib.
+
+exec 2>&1
+export LD_LIBRARY_PATH=/mnt/data/lib:$LD_LIBRARY_PATH
+
+[ -f /mnt/data/etc/os-release ] && . /mnt/data/etc/os-release
+FW="${CHUANGMI_VERSION:-4.3.7_0417}"
+
+MOTOR_CONTROL="/mnt/sdcard/hacks/motor_control"
+ONVIF_DIR="/mnt/sdcard/hacks/onvif_srvd"
+EVENT_FILE="$MOTOR_CONTROL/event"
+PTZ_CONF="/mnt/sdcard/hacks/ptz.conf"
+
+# PTZ direction settings. 0 = normal, 1 = inverted.
+# For a ceiling-mounted camera with the image flip enabled, set both to 1.
+INVERT_PAN=0
+INVERT_TILT=0
+[ -f "$PTZ_CONF" ] && . "$PTZ_CONF"
+INVERT_PAN=${INVERT_PAN:-0}
+INVERT_TILT=${INVERT_TILT:-0}
+
+if [ "$INVERT_PAN" = "1" ]; then
+    MOVE_LEFT="pan reverse"
+    MOVE_RIGHT="pan forward"
+else
+    MOVE_LEFT="pan forward"
+    MOVE_RIGHT="pan reverse"
+fi
+
+if [ "$INVERT_TILT" = "1" ]; then
+    MOVE_UP="tilt reverse"
+    MOVE_DOWN="tilt forward"
+else
+    MOVE_UP="tilt forward"
+    MOVE_DOWN="tilt reverse"
+fi
+
+IP_ADDR=""
+while [ -z "$IP_ADDR" ]; do
+    IP_ADDR=$(ip -4 addr show wlan0 | grep inet | awk '{print $2}' | cut -d'/' -f1)
+    [ -z "$IP_ADDR" ] && sleep 2
+done
+
+start_motord() {
+    if ! pidof motord > /dev/null; then
+        ( cd "$MOTOR_CONTROL" && ./motord >/dev/null 2>&1 & )
+    fi
+}
+
+start_onvif() {
+    rm -f /var/run/onvif_srvd.pid
+    ( cd "$ONVIF_DIR" && ./onvif_srvd --pid_file /var/run/onvif_srvd.pid \
+        --model MJSXJ02CM --manufacturer Xiaomi --firmware_ver "$FW" \
+        --ifs wlan0 --port 5000 --scope onvif://www.onvif.org/Profile/S \
+        --name HD --width 1920 --height 1080 \
+        --url "rtsp://$IP_ADDR:8554/mainstream" --type H264 --ptz \
+        --move_left "sh -c 'echo $MOVE_LEFT 5 > $EVENT_FILE'" \
+        --move_right "sh -c 'echo $MOVE_RIGHT 5 > $EVENT_FILE'" \
+        --move_up "sh -c 'echo $MOVE_UP 5 > $EVENT_FILE'" \
+        --move_down "sh -c 'echo $MOVE_DOWN 5 > $EVENT_FILE'" \
+        >/dev/null 2>&1 & )
+}
+
+start_motord
+start_onvif
+
+while true; do
+    start_motord
+    if ! pidof onvif_srvd > /dev/null; then
+        start_onvif
+    fi
+    sleep 10
+done
